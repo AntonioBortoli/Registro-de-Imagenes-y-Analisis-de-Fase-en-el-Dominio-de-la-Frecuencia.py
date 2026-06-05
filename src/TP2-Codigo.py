@@ -1,18 +1,4 @@
-"""
-=============================================================================
-TRABAJO PRÁCTICO 2 - Análisis Numérico (2026)
-Registro de Imágenes y Análisis de Fase en el Dominio de la Frecuencia
-=============================================================================
-Tema: Implementación de algoritmos de registro de imágenes basados en
-      propiedades de la Transformada de Fourier (correlación de fase).
 
-Consignas:
-  1. Estimación de traslación mediante correlación de fase
-  2. Registro de rotación (coordenadas polares)
-  3. Registro de escalamiento (coordenadas log-polares)
-  4. Coherencia de fase (búsqueda del factor k óptimo)
-=============================================================================
-"""
 
 import os
 import time
@@ -22,23 +8,8 @@ import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fftshift, ifftshift
 import imageio.v3 as iio
 
-# =============================================================================
-# FUNCIÓN AUXILIAR
-# Lectura segura de imágenes (maneja rutas con tildes u otros caracteres
-# especiales que cv2.imread no tolera en ciertos sistemas operativos).
-# =============================================================================
 def leer_imagen_segura(ruta, flag_cv2):
-    """
-    Lee una imagen desde disco usando numpy como intermediario,
-    lo que evita problemas de codificación en la ruta del archivo.
 
-    Parámetros:
-        ruta    : ruta completa al archivo de imagen
-        flag_cv2: flag de OpenCV (ej: cv2.IMREAD_GRAYSCALE)
-
-    Retorna:
-        imagen como array NumPy, o None si falla la lectura
-    """
     try:
         array_bytes = np.fromfile(ruta, dtype=np.uint8)
         img = cv2.imdecode(array_bytes, flag_cv2)
@@ -49,48 +20,9 @@ def leer_imagen_segura(ruta, flag_cv2):
         print(f"  [ERROR] No se pudo leer '{ruta}': {e}")
         return None
 
-
-# =============================================================================
 # CONSIGNA 1 — TRASLACIÓN
-# =============================================================================
-#
-# TEORÍA:
-# Si f2(x,y) = f1(x - x0, y - y0), entonces por la propiedad de desplazamiento
-# de la DFT:
-#       F2(u,v) = F1(u,v) · exp(-j2π(u·x0/M + v·y0/N))
-#
-# El espectro cruzado normalizado entre F1 y F2 es:
-#       G(u,v) = F1·conj(F2) / |F1·conj(F2)|  = exp(+j2π(u·x0/M + v·y0/N))
-#
-# Al aplicar la IDFT, G se convierte en un impulso (delta de Dirac) ubicado
-# exactamente en (x0, y0). El pico de esa función es el desplazamiento.
-#
-# INVARIANCIA A TRASLACIONES:
-# La MAGNITUD del espectro |F(u,v)| = |F1(u,v)| es idéntica para f1 y f2:
-#   |F2(u,v)| = |F1(u,v)| · |exp(-j2π...)| = |F1(u,v)| · 1 = |F1(u,v)|
-# El factor exponencial tiene módulo 1, por lo tanto la magnitud NO cambia
-# con la traslación. Solo la FASE se ve afectada.
-# =============================================================================
-
 def correlacion_fase(img1, img2):
-    """
-    Calcula el vector de traslación (dx, dy) entre dos imágenes
-    usando correlación de fase en el dominio de la frecuencia.
 
-    Algoritmo:
-        1. Calcular DFT de ambas imágenes.
-        2. Construir el espectro cruzado normalizado (fase pura).
-        3. Aplicar IDFT → pico en la posición del desplazamiento.
-        4. Corregir el desplazamiento para valores negativos (wrap-around).
-
-    Complejidad computacional: O(N² log N) — dominado por las FFT.
-
-    Parámetros:
-        img1, img2: arrays 2D de tipo float
-
-    Retorna:
-        (dx, dy): desplazamiento en píxeles en X e Y
-    """
     F1 = fft2(img1)
     F2 = fft2(img2)
 
@@ -115,24 +47,7 @@ def correlacion_fase(img1, img2):
 
 
 def traslacion_espacial(img1, img2, rango=50):
-    """
-    Algoritmo ESPACIAL de comparación de píxeles para estimar traslación.
 
-    Estrategia: Suma de Diferencias Absolutas (SAD).
-    Para cada candidato de desplazamiento (dx, dy) en el rango dado,
-    calcula la diferencia pixel a pixel entre img1 y img2 desplazada.
-    El desplazamiento con menor diferencia es el estimado.
-
-    Complejidad: O(rango² · N²) — MUCHO más costoso que la correlación de fase.
-
-    Parámetros:
-        img1, img2: arrays 2D de tipo float
-        rango     : búsqueda en [-rango, +rango] en ambas dimensiones
-
-    Retorna:
-        (dx_est, dy_est): desplazamiento estimado
-        tiempo_total    : tiempo de ejecución en segundos
-    """
     H, W = img1.shape
     mejor_dx, mejor_dy = 0, 0
     min_sad = np.inf
@@ -162,40 +77,10 @@ def traslacion_espacial(img1, img2, rango=50):
     tiempo_total = time.time() - t_inicio
     return mejor_dx, mejor_dy, tiempo_total
 
-
-# =============================================================================
 # CONSIGNA 2 — ROTACIÓN
-# =============================================================================
-#
-# TEORÍA:
-# Si f2(x,y) es f1 rotada un ángulo θ0, entonces sus transformadas de Fourier
-# también están rotadas el mismo ángulo θ0.
-# La MAGNITUD del espectro es invariante a traslaciones (ver arriba), por lo
-# tanto |F2(u,v)| = |F1(u,v) rotado θ0|.
-#
-# Al convertir las magnitudes a COORDENADAS POLARES (ρ, θ), la rotación θ0
-# en el dominio cartesiano se transforma en un DESPLAZAMIENTO LINEAL en el
-# eje θ del mapa polar. Luego se aplica correlación de fase sobre esos mapas
-# para encontrar dicho desplazamiento.
-# =============================================================================
 
 def registrar_rotacion(img1, img2):
-    """
-    Estima el ángulo de rotación entre img1 e img2 usando el espectro
-    de Fourier y un mapeo a coordenadas polares.
 
-    Pasos:
-        1. Calcular magnitud del espectro centrado (fftshift) de ambas.
-        2. Mapear a coordenadas polares (linearPolar).
-        3. La rotación → desplazamiento lineal en el eje θ.
-        4. Correlación de fase sobre los mapas polares → ángulo.
-
-    Parámetros:
-        img1, img2: arrays 2D de tipo float
-
-    Retorna:
-        angulo: rotación estimada en grados
-    """
     # Magnitud del espectro centrado en la frecuencia cero
     mag1 = np.log1p(np.abs(fftshift(fft2(img1))))
     mag2 = np.log1p(np.abs(fftshift(fft2(img2))))
@@ -222,39 +107,8 @@ def registrar_rotacion(img1, img2):
     return angulo, mag1, mag2, polar1, polar2
 
 
-# =============================================================================
-# CONSIGNA 3 — ESCALAMIENTO (ZOOM)
-# =============================================================================
-#
-# TEORÍA:
-# Si f2(x,y) = f1(x/s, y/s) (escala s), entonces:
-#       F2(u,v) = s² · F1(s·u, s·v)
-# En coordenadas polares: la magnitud se escala en ρ (radio), no en θ (ángulo).
-#
-# Si tomamos LOGARITMO del radio: log(ρ) → log(s·ρ') = log(s) + log(ρ')
-# El cambio de escala → DESPLAZAMIENTO LINEAL en el eje log(ρ).
-# Esto es exactamente lo que hace cv2.logPolar.
-# Luego la correlación de fase sobre el mapa log-polar recupera log(s),
-# y con una exponencial obtenemos el factor s.
-# =============================================================================
-
 def registrar_escala(img1, img2):
-    """
-    Estima el factor de escala entre img1 e img2 usando el espectro de
-    Fourier y un mapeo a coordenadas log-polares.
 
-    Pasos:
-        1. Calcular magnitud del espectro centrado de ambas.
-        2. Mapear a coordenadas log-polares (logPolar).
-        3. El cambio de escala → desplazamiento en el eje log(ρ).
-        4. Correlación de fase → desplazamiento → exponencial → factor s.
-
-    Parámetros:
-        img1, img2: arrays 2D de tipo float
-
-    Retorna:
-        factor_escala: escala estimada (s > 1 = zoom in, s < 1 = zoom out)
-    """
     mag1 = np.log1p(np.abs(fftshift(fft2(img1))))
     mag2 = np.log1p(np.abs(fftshift(fft2(img2))))
 
@@ -279,57 +133,12 @@ def registrar_escala(img1, img2):
     return factor_escala, mag1, mag2, logpolar1, logpolar2
 
 
-# =============================================================================
+
 # CONSIGNA 4 — COHERENCIA DE FASE
-# =============================================================================
-#
-# TEORÍA:
-# Dadas dos imágenes ordinarias f6 y f7, se construye una imagen híbrida
-# combinando componentes espectrales de ambas:
-#       F_hibrido = |FFT(f6)| · exp(j · k · angle(FFT(f7)))
-#       I_recuperada = Re(IDFT(F_hibrido))
-#
-# La imagen objetivo está "oculta" en la fase de f7, pero dicha fase fue
-# comprimida por un factor k desconocido. Al probar distintos valores de k
-# y medir la NITIDEZ de la imagen resultante (gradiente Sobel / Tenengrad),
-# el k que produce la imagen más nítida es el correcto.
-#
-# DIFERENCIA JPG vs TIF:
-# - TIF: imagen sin pérdidas → magnitud y fase espectrales exactas → recuperación ideal.
-# - JPG: compresión con pérdidas (DCT + cuantización) → introduce artefactos
-#   en la fase que degradan la reconstrucción y generan bordes espurios.
-# =============================================================================
+
 
 def busqueda_k_optimo(img6, img7, n_valores=200, k_min=0.1, k_max=10.0):
-    """
-    Busca el factor de compresión de fase k óptimo mediante barrido.
 
-    img6 e img7 son imágenes ordinarias (píxeles). El procedimiento correcto
-    según la consigna es:
-        - La MAGNITUD del espectro proviene de img6: |FFT(img6)|
-        - La FASE del espectro proviene de img7: angle(FFT(img7))
-          pero dicha fase fue comprimida por un factor k desconocido.
-
-    Para cada k candidato:
-        1. Calcular FFT de ambas imágenes y extraer componentes espectrales.
-        2. Reconstruir el espectro: F = |FFT(img6)| · exp(j · k · angle(FFT(img7)))
-        3. Obtener imagen: I = Re(IDFT(F))
-        4. Medir nitidez con gradiente Sobel (métrica Tenengrad).
-
-    El k que maximiza la nitidez es el óptimo.
-
-    Parámetros:
-        img6         : array 2D — imagen cuya magnitud espectral se usará
-        img7         : array 2D — imagen cuya fase espectral (comprimida) se usará
-        n_valores    : cantidad de valores de k a probar
-        k_min, k_max : rango de búsqueda de k
-
-    Retorna:
-        mejor_k      : valor óptimo de k
-        mejor_imagen : imagen reconstruida con k óptimo
-        curva_nitidez: array con la nitidez para cada k (para graficar)
-        valores_k    : array con los valores de k probados
-    """
     # Aplicar FFT a las imágenes originales y extraer magnitud y fase espectrales
     F6 = fftshift(fft2(img6.astype(np.float64)))
     F7 = fftshift(fft2(img7.astype(np.float64)))
@@ -368,9 +177,9 @@ def busqueda_k_optimo(img6, img7, n_valores=200, k_min=0.1, k_max=10.0):
     return mejor_k, mejor_imagen, curva_nitidez, valores_k
 
 
-# =============================================================================
+
 # FUNCIONES DE VISUALIZACIÓN
-# =============================================================================
+
 
 def graficar_traslacion(img1, img2, correlacion, dx, dy):
     """Visualiza las imágenes y el mapa de correlación de fase."""
@@ -524,11 +333,7 @@ def graficar_coherencia_fase(img_recuperada, k_optimo, curva, valores_k,
     plt.savefig(os.path.join(BASE_DIR, nombre), dpi=150)
     plt.show()
 
-
-# =============================================================================
 # BLOQUE PRINCIPAL
-# =============================================================================
-
 if __name__ == "__main__":
 
     # Directorio donde están las imágenes (mismo directorio que este script)
@@ -538,9 +343,8 @@ if __name__ == "__main__":
     print("  TP2 — Registro de Imágenes y Análisis de Fase")
     print("=" * 60)
 
-    # -------------------------------------------------------------------------
     # CONSIGNA 1 — TRASLACIÓN
-    # -------------------------------------------------------------------------
+
     print("\n--- CONSIGNA 1: Traslación ---")
 
     img1 = leer_imagen_segura(os.path.join(BASE_DIR, 'imagen1.jpg'), cv2.IMREAD_GRAYSCALE)
@@ -593,9 +397,8 @@ if __name__ == "__main__":
     else:
         print("  ERROR: No se pudieron cargar imagen1.jpg o imagen2.jpg")
 
-    # -------------------------------------------------------------------------
     # CONSIGNA 2 — ROTACIÓN
-    # -------------------------------------------------------------------------
+
     print("\n--- CONSIGNA 2: Rotación ---")
 
     img3 = leer_imagen_segura(os.path.join(BASE_DIR, 'imagen3.jpg'), cv2.IMREAD_GRAYSCALE)
@@ -617,9 +420,9 @@ if __name__ == "__main__":
     else:
         print("  ERROR: No se pudieron cargar imagen3.jpg o imagen4.jpg")
 
-    # -------------------------------------------------------------------------
+
     # CONSIGNA 3 — ESCALAMIENTO
-    # -------------------------------------------------------------------------
+
     print("\n--- CONSIGNA 3: Escalamiento ---")
 
     img5 = leer_imagen_segura(os.path.join(BASE_DIR, 'imagen5.jpg'), cv2.IMREAD_GRAYSCALE)
@@ -643,9 +446,9 @@ if __name__ == "__main__":
     else:
         print("  ERROR: No se pudieron cargar imagen5.jpg o imagen1.jpg")
 
-    # -------------------------------------------------------------------------
+
     # CONSIGNA 4 — COHERENCIA DE FASE
-    # -------------------------------------------------------------------------
+
     print("\n--- CONSIGNA 4: Coherencia de Fase ---")
 
     # --- 4a. Con archivos TIF (sin pérdidas) ---
@@ -672,7 +475,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"  ERROR procesando TIFs: {e}")
 
-    # --- 4b. Con archivos JPG (con pérdidas) ---
+    # ---  Con archivos JPG (con pérdidas) ---
     print("\n  [4b. Archivos JPG — con pérdidas de compresión]")
     img6_jpg = leer_imagen_segura(os.path.join(BASE_DIR, 'imagen6.jpg'), cv2.IMREAD_GRAYSCALE)
     img7_jpg = leer_imagen_segura(os.path.join(BASE_DIR, 'imagen7.jpg'), cv2.IMREAD_GRAYSCALE)
@@ -692,22 +495,7 @@ if __name__ == "__main__":
         print(f"    Factor k óptimo (JPG): {k_jpg:.2f}")
         graficar_coherencia_fase(img_jpg, k_jpg, curva_jpg, vals_jpg, "(JPG — con pérdidas)")
 
-        # --- Comparación TIF vs JPG ---
-        print("\n  [Comparación TIF vs JPG]")
-        print("  ┌──────────────────────────────────────────────────────┐")
-        print("  │  TIF (sin pérdidas):                                 │")
-        print("  │   → Magnitud y fase exactas                          │")
-        print("  │   → Reconstrucción fiel de la imagen original        │")
-        print("  │   → El pico de nitidez es pronunciado y claro        │")
-        print("  │                                                      │")
-        print("  │  JPG (con pérdidas):                                 │")
-        print("  │   → Compresión DCT + cuantización introduce ruido    │")
-        print("  │   → La fase se ve corrompida por artefactos JPEG     │")
-        print("  │   → La reconstrucción muestra bordes espurios y      │")
-        print("  │     bloques 8x8 propios del codec JPEG               │")
-        print("  │   → El pico de nitidez puede ser menos nítido o      │")
-        print("  │     desplazado del k real                            │")
-        print("  └──────────────────────────────────────────────────────┘")
+
 
     else:
         print("  ERROR: No se pudieron cargar imagen6.jpg o imagen7.jpg")
